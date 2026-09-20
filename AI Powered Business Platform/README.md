@@ -66,25 +66,22 @@ To run this project locally:
 Clone the repository:
 
 Bash
-[git clone https://github.com/yourusername/ai-ops-platform.git
-](url)
-[cd ai-ops-platform
-](url)
+
+(git clone https://github.com/yourusername/ai-ops-platform.git
+)
+(cd ai-ops-platform)
 
 **Install dependencies:
 **
 
 Bash
-[[npm install
-](url)
-[]()npm install lucide-react
-](url)
+(npm install)
+(npm install lucide-react)
 
 ##Run the development server:
 
 Bash
-[npm run dev
-](url)
+(npm run dev)
 Access the application:
 Open your browser and navigate to http://localhost:5173.
 Note: Use the toggle on the login screen to explore both Customer and Employee views.
