@@ -4,9 +4,11 @@ import AgentDashboard from './AgentDashboard';
 import TicketDetail from './TicketDetail'; 
 import KnowledgeBase from './KnowledgeBase';
 import AnalyticsDashboard from './AnalyticsDashboard'; 
-import Login from './Login';
-// 1. IMPORT SETTINGS
 import AdminSettings from './AdminSettings';
+import Login from './Login';
+// IMPORT THE TWO NEW FILES
+import AuditLogs from './AuditLogs';
+import SystemMonitoring from './SystemMonitoring';
 
 function App() {
   const [userRole, setUserRole] = useState(null); 
@@ -15,11 +17,6 @@ function App() {
   const handleLogin = (role) => {
     setUserRole(role);
     setCurrentView(role === 'customer' ? 'customer-portal' : 'agent-dashboard');
-  };
-
-  const handleLogout = () => {
-    setUserRole(null);
-    setCurrentView('');
   };
 
   if (!userRole) {
@@ -31,7 +28,7 @@ function App() {
       <nav style={{ 
         padding: '1rem 2rem', backgroundColor: '#111827', color: 'white', 
         display: 'flex', alignItems: 'center', gap: '1rem',
-        position: 'sticky', top: 0, zIndex: 10
+        position: 'sticky', top: 0, zIndex: 10, flexWrap: 'wrap'
       }}>
         <div style={{ fontWeight: 'bold', fontSize: '1.25rem', marginRight: 'auto' }}>
           AI Ops Platform
@@ -50,29 +47,46 @@ function App() {
           <>
             <button 
               onClick={() => setCurrentView('agent-dashboard')}
-              style={{ background: (currentView === 'agent-dashboard' || currentView === 'ticket-detail') ? '#2563eb' : 'transparent', color: 'white', border: '1px solid #2563eb', padding: '0.5rem 1rem', borderRadius: '0.375rem', cursor: 'pointer' }}
+              style={{ background: (currentView === 'agent-dashboard' || currentView === 'ticket-detail') ? '#2563eb' : 'transparent', color: 'white', border: 'none', padding: '0.5rem 1rem', borderRadius: '0.375rem', cursor: 'pointer' }}
             >
               Dashboard
             </button>
             <button 
               onClick={() => setCurrentView('knowledge')}
-              style={{ background: currentView === 'knowledge' ? '#9333ea' : 'transparent', color: 'white', border: '1px solid #9333ea', padding: '0.5rem 1rem', borderRadius: '0.375rem', cursor: 'pointer' }}
+              style={{ background: currentView === 'knowledge' ? '#9333ea' : 'transparent', color: 'white', border: 'none', padding: '0.5rem 1rem', borderRadius: '0.375rem', cursor: 'pointer' }}
             >
               Knowledge Base
             </button>
             <button 
               onClick={() => setCurrentView('analytics')}
-              style={{ background: currentView === 'analytics' ? '#059669' : 'transparent', color: 'white', border: '1px solid #059669', padding: '0.5rem 1rem', borderRadius: '0.375rem', cursor: 'pointer' }}
+              style={{ background: currentView === 'analytics' ? '#059669' : 'transparent', color: 'white', border: 'none', padding: '0.5rem 1rem', borderRadius: '0.375rem', cursor: 'pointer' }}
             >
               Analytics
             </button>
-            {/* 2. ADD SETTINGS BUTTON */}
-            <button 
-              onClick={() => setCurrentView('settings')}
-              style={{ background: currentView === 'settings' ? '#4b5563' : 'transparent', color: 'white', border: '1px solid #4b5563', padding: '0.5rem 1rem', borderRadius: '0.375rem', cursor: 'pointer' }}
-            >
-              Settings
-            </button>
+            
+            {/* ADMIN ONLY DROPDOWN MENU SIMULATION */}
+            <div style={{ display: 'flex', gap: '0.5rem', borderLeft: '1px solid #374151', paddingLeft: '1rem', marginLeft: '0.5rem' }}>
+              <span style={{ fontSize: '0.75rem', color: '#6b7280', alignSelf: 'center', marginRight: '0.5rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Admin</span>
+              
+              <button 
+                onClick={() => setCurrentView('settings')}
+                style={{ background: currentView === 'settings' ? '#4b5563' : 'transparent', color: 'white', border: '1px solid #4b5563', padding: '0.4rem 0.8rem', borderRadius: '0.375rem', cursor: 'pointer', fontSize: '0.875rem' }}
+              >
+                Settings
+              </button>
+              <button 
+                onClick={() => setCurrentView('audit')}
+                style={{ background: currentView === 'audit' ? '#4b5563' : 'transparent', color: 'white', border: '1px solid #4b5563', padding: '0.4rem 0.8rem', borderRadius: '0.375rem', cursor: 'pointer', fontSize: '0.875rem' }}
+              >
+                Logs
+              </button>
+              <button 
+                onClick={() => setCurrentView('monitoring')}
+                style={{ background: currentView === 'monitoring' ? '#4b5563' : 'transparent', color: 'white', border: '1px solid #4b5563', padding: '0.4rem 0.8rem', borderRadius: '0.375rem', cursor: 'pointer', fontSize: '0.875rem' }}
+              >
+                System Health
+              </button>
+            </div>
           </>
         )}
         
@@ -81,7 +95,7 @@ function App() {
             {userRole === 'customer' ? 'Customer' : 'Employee'}
           </span>
           <button 
-            onClick={handleLogout}
+            onClick={() => {setUserRole(null); setCurrentView('');}}
             style={{ background: 'transparent', color: '#f87171', border: 'none', cursor: 'pointer', fontSize: '0.875rem', fontWeight: 'bold' }}
           >
             Sign Out
@@ -95,8 +109,10 @@ function App() {
         {currentView === 'ticket-detail' && <TicketDetail onBack={() => setCurrentView('agent-dashboard')} />}
         {currentView === 'knowledge' && <KnowledgeBase />}
         {currentView === 'analytics' && <AnalyticsDashboard />}
-        {/* 3. RENDER SETTINGS VIEW */}
         {currentView === 'settings' && <AdminSettings />}
+        {/* RENDER THE NEW VIEWS */}
+        {currentView === 'audit' && <AuditLogs />}
+        {currentView === 'monitoring' && <SystemMonitoring />}
       </div>
     </div>
   );
