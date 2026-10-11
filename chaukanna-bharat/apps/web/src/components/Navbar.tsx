@@ -68,7 +68,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenRegistry }) => {
               onChange={(e) => setLanguage(e.target.value as SupportedLanguage)}
               className="pl-8 pr-7 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500 appearance-none cursor-pointer"
             >
-              {Object.values(availableLanguages).map((lang) => (
+              {(Object.values(availableLanguages) as Array<{ code: SupportedLanguage; label: string; nativeName: string }>).map((lang) => (
                 <option key={lang.code} value={lang.code}>
                   {lang.nativeName} ({lang.label})
                 </option>

@@ -2,7 +2,7 @@ import React from 'react';
 import { Sparkles, ShieldAlert, ArrowRight, ShieldCheck, AlertCircle } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext.js';
 import { useAnalysis } from '../context/AnalysisContext.js';
-import { DEMO_SAMPLES } from '@chaukanna/shared';
+import { DEMO_SAMPLES, DemoSample } from '@chaukanna/shared';
 
 export const HeroBanner: React.FC = () => {
   const { t } = useLanguage();
@@ -46,7 +46,7 @@ export const HeroBanner: React.FC = () => {
         {/* Scenario Presets Pills */}
         <div className="mt-5 flex flex-wrap items-center justify-center gap-2 text-xs">
           <span className="text-slate-400 dark:text-slate-500 font-medium">Or test scenarios:</span>
-          {DEMO_SAMPLES.map((demo) => (
+          {DEMO_SAMPLES.map((demo: DemoSample) => (
             <button
               key={demo.id}
               onClick={() => loadDemoById(demo.id)}

@@ -75,7 +75,7 @@ export const AnalysisProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const loadDemoById = async (sampleId: string) => {
     setLoading(true);
     setError(null);
-    const demo = DEMO_SAMPLES.find(s => s.id === sampleId) || DEMO_SAMPLES[0];
+    const demo = DEMO_SAMPLES.find((s: DemoSample) => s.id === sampleId) || DEMO_SAMPLES[0];
     setActiveDemo(demo);
     try {
       const response = await fetchDemoSampleApi(demo.id);
