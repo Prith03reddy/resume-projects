@@ -2,16 +2,19 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import io from 'socket.io-client';
 import Header from './components/Header';
 import AlertBanner from './components/AlertBanner';
-import PatientCard from './components/PatientCard';
-import TelemetryCard from './components/TelemetryCard';
-import ActionControls from './components/ActionControls';
-import IncidentMap from './components/IncidentMap';
 import DriverCountdownModal from './components/DriverCountdownModal';
-import DriverConsoleView from './components/DriverConsoleView';
+import HospitalDashboard from './components/dashboards/HospitalDashboard';
+import PatientDashboard from './components/dashboards/PatientDashboard';
+import AdminDashboard from './components/dashboards/AdminDashboard';
+import LoginPage from './components/LoginPage';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { X } from 'lucide-react';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
 
-export default function App() {
+function AuraTriageMain() {
+  const { user } = useAuth();
+
   const [isConnected, setIsConnected] = useState(false);
   const [activeAlertCount, setActiveAlertCount] = useState(1);
   const [showAlertBanner, setShowAlertBanner] = useState(true);
@@ -19,20 +22,21 @@ export default function App() {
   const [isReserving, setIsReserving] = useState(false);
   const [activeTab, setActiveTab] = useState('triage'); // 'triage' | 'driver'
   const [isDriverModalOpen, setIsDriverModalOpen] = useState(false);
-  
-  // Default to Dark Operations Center Mode as recommended for ER monitoring
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+
+  // Operations Center Dark Theme by Default
   const [isDark, setIsDark] = useState(true);
 
   const socketRef = useRef(null);
 
-  // Active Incident State
+  // Active Incident State (Preserved for Real-Time Telemetry & Map Routing)
   const [incident, setIncident] = useState({
     id: 'inc-seed-911',
     status: 'TRIGGERED',
     telematics: {
-      preCrashSpeedKmh: 92.5,
-      impactSpeedKmh: 6.0,
-      peakGForce: 5.10,
+      preCrashSpeedKmh: 94.5,
+      impactSpeedKmh: 6.2,
+      peakGForce: 4.85,
       crashCoordinates: {
         latitude: 40.7589,
         longitude: -73.9620,
@@ -52,13 +56,13 @@ export default function App() {
     },
     patient: {
       id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      patientId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
       fullName: 'Alex Mercer',
       age: 34,
       bloodGroup: 'O-',
       allergies: ['Penicillin', 'Sulfa Drugs'],
       chronicConditions: ['Mild Asthma', 'Hypertension'],
-      emergencyContactName: 'Sarah Mercer (Spouse)',
-      emergencyContactPhone: '+1 (555) 382-9912',
+      emergencyContact: 'Sarah Mercer (Spouse) +1 (555) 382-9912',
     },
   });
 
@@ -100,6 +104,7 @@ export default function App() {
     socket.on('connect', () => {
       console.log('[Dashboard] Connected to AuraTriage Real-Time Broker:', socket.id);
       setIsConnected(true);
+      socket.emit('JOIN_ROOM', { hospitalId: incident.routing.hospitalId });
       socket.emit('dashboard:join', { hospitalId: incident.routing.hospitalId });
     });
 
@@ -108,22 +113,63 @@ export default function App() {
     });
 
     // Real-Time Inbound SOS Trigger from Mobile Edge Device / Driver Unit
-    socket.on('trauma:incoming_alert', (incoming) => {
-      console.warn('[Dashboard] Inbound collision telemetry received:', incoming);
-      setIncident(incoming);
+    const handleEmergencyAlert = (incoming) => {
+      console.warn('[Dashboard] Inbound EMERGENCY_CRASH_ALERT received:', incoming);
+      const formatted = incoming.incident || incoming;
+      const telematics = formatted.telemetry || formatted.telematics || {};
+      const coords = telematics.coordinates || telematics.crashCoordinates || { latitude: 40.7589, longitude: -73.9620 };
+      const routing = formatted.hospital || formatted.routing || {};
+
+      setIncident({
+        id: formatted.incidentId || formatted.id || `inc-${Date.now()}`,
+        status: formatted.status || 'DISPATCHED',
+        telematics: {
+          preCrashSpeedKmh: telematics.preCrashSpeedKmh || 94.5,
+          impactSpeedKmh: telematics.impactSpeedKmh || 6.2,
+          peakGForce: telematics.peakGForce || 4.85,
+          crashCoordinates: coords,
+        },
+        routing: {
+          hospitalId: routing.hospitalId || routing.id || incident.routing.hospitalId,
+          hospitalName: routing.name || routing.hospitalName || incident.routing.hospitalName,
+          traumaLevel: routing.traumaLevel ? `Level-${routing.traumaLevel}` : incident.routing.traumaLevel,
+          distanceKm: formatted.calculatedDistanceKm || routing.distanceKm || 1.4,
+          transitEtaMinutes: formatted.transitEtaMinutes || routing.transitEtaMinutes || 5,
+          hospitalCoordinates: routing.coordinates || (routing.latitude ? { latitude: routing.latitude, longitude: routing.longitude } : incident.routing.hospitalCoordinates),
+        },
+        patient: formatted.patient || incident.patient,
+      });
+
       setShowAlertBanner(true);
       setIsAcknowledged(false);
       setActiveAlertCount((prev) => Math.max(1, prev + 1));
       setActiveTab('triage');
       playAlertChime();
-    });
+    };
+
+    socket.on('EMERGENCY_CRASH_ALERT', handleEmergencyAlert);
+    socket.on('trauma:incoming_alert', handleEmergencyAlert);
 
     // Trauma Bay status synchronization
-    socket.on('trauma:status_updated', (update) => {
+    const handleStatusSync = (update) => {
       if (update.incidentId === incident.id) {
         setIncident((prev) => ({ ...prev, status: update.status }));
       }
-    });
+    };
+
+    socket.on('INCIDENT_UPDATED', handleStatusSync);
+    socket.on('trauma:status_updated', handleStatusSync);
+
+    // Hydrate active queue from GET /api/v1/incidents/active on mount
+    fetch(`${BACKEND_URL}/api/v1/incidents/active`)
+      .then((res) => res.json())
+      .then((data) => {
+        const list = Array.isArray(data) ? data : data.incidents;
+        if (list && list.length > 0) {
+          handleEmergencyAlert(list[0]);
+        }
+      })
+      .catch((err) => console.log('[Hydrate Queue Notice]', err.message));
 
     return () => {
       socket.disconnect();
@@ -140,7 +186,7 @@ export default function App() {
   const handleReserveBay = async () => {
     setIsReserving(true);
     try {
-      await fetch(`${BACKEND_URL}/api/incidents/${incident.id}/status`, {
+      await fetch(`${BACKEND_URL}/api/v1/incidents/${incident.id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'PREPARED' }),
@@ -155,7 +201,6 @@ export default function App() {
 
       setIncident((prev) => ({ ...prev, status: 'PREPARED' }));
     } catch (err) {
-      console.warn('API update fallback to local state:', err);
       setIncident((prev) => ({ ...prev, status: 'PREPARED' }));
     } finally {
       setIsReserving(false);
@@ -165,43 +210,76 @@ export default function App() {
   // Handle "Release / Modify Bay" Action
   const handleReleaseBay = async () => {
     try {
-      await fetch(`${BACKEND_URL}/api/incidents/${incident.id}/status`, {
+      await fetch(`${BACKEND_URL}/api/v1/incidents/${incident.id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'TRIGGERED' }),
+        body: JSON.stringify({ status: 'DISPATCHED' }),
       });
 
-      if (socketRef.current?.connected) {
-        socketRef.current.emit('trauma:status_updated', {
-          incidentId: incident.id,
-          status: 'TRIGGERED',
-        });
-      }
-
-      setIncident((prev) => ({ ...prev, status: 'TRIGGERED' }));
+      setIncident((prev) => ({ ...prev, status: 'DISPATCHED' }));
     } catch (err) {
-      setIncident((prev) => ({ ...prev, status: 'TRIGGERED' }));
+      setIncident((prev) => ({ ...prev, status: 'DISPATCHED' }));
     }
   };
 
   // Dispatch Confirmed SOS (after 10s countdown or bypass)
   const handleDispatchConfirmed = async (telemetryParams) => {
     try {
-      const response = await fetch(`${BACKEND_URL}/api/incidents/sos`, {
+      const response = await fetch(`${BACKEND_URL}/api/v1/sos/trigger`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          patientId: incident.patient.id,
-          preCrashSpeed: telemetryParams.preSpeed || 94.5,
-          impactSpeed: telemetryParams.impactSpeed || 6.2,
-          peakGForce: telemetryParams.peakG || 4.85,
-          latitude: telemetryParams.lat || 40.7589,
-          longitude: telemetryParams.lon || -73.9620,
+          patientId: 'random',
+          preCrashSpeedKmh: telemetryParams.preSpeed || (Math.random() * 45 + 75).toFixed(1),
+          peakGForce: telemetryParams.peakG || (Math.random() * 2.8 + 3.9).toFixed(2),
+          lat: telemetryParams.latitude || telemetryParams.lat,
+          lng: telemetryParams.longitude || telemetryParams.lon || telemetryParams.lng,
+          randomize: true,
         }),
       });
+
       const result = await response.json();
-      if (result.data) {
-        setIncident(result.data);
+      if (result.incident) {
+        const inc = result.incident;
+        const tele = inc.telemetry || {};
+        const hosp = inc.hospital || {};
+        const pat = inc.patient || {};
+
+        setIncident({
+          id: inc.incidentId,
+          status: inc.status || 'DISPATCHED',
+          telematics: {
+            preCrashSpeedKmh: tele.preCrashSpeedKmh || telemetryParams.preSpeed,
+            impactSpeedKmh: telemetryParams.impactSpeed || 5.8,
+            peakGForce: tele.peakGForce || telemetryParams.peakG,
+            crashCoordinates: tele.coordinates || {
+              latitude: telemetryParams.latitude || 40.7589,
+              longitude: telemetryParams.longitude || -73.9620,
+            },
+          },
+          routing: {
+            hospitalId: hosp.id || hosp.hospitalId,
+            hospitalName: hosp.name,
+            traumaLevel: `Level-${hosp.traumaLevel}`,
+            distanceKm: inc.calculatedDistanceKm || 1.8,
+            transitEtaMinutes: inc.transitEtaMinutes || 4,
+            hospitalCoordinates: {
+              latitude: hosp.latitude,
+              longitude: hosp.longitude,
+            },
+          },
+          patient: {
+            id: pat.id,
+            patientId: pat.id,
+            fullName: pat.fullName,
+            age: pat.age,
+            bloodGroup: pat.bloodGroup,
+            allergies: pat.allergies,
+            chronicConditions: pat.chronicConditions,
+            emergencyContact: pat.emergencyContact,
+          },
+        });
+
         setShowAlertBanner(true);
         setIsAcknowledged(false);
         setActiveAlertCount((prev) => prev + 1);
@@ -210,121 +288,75 @@ export default function App() {
       }
     } catch (err) {
       console.warn('Backend SOS dispatch fallback:', err);
-      setIncident((prev) => ({
-        ...prev,
-        id: `inc-${Date.now()}`,
-        status: 'TRIGGERED',
-        telematics: {
-          preCrashSpeedKmh: telemetryParams.preSpeed || 94.5,
-          impactSpeedKmh: telemetryParams.impactSpeed || 6.2,
-          peakGForce: telemetryParams.peakG || 4.85,
-          crashCoordinates: {
-            latitude: telemetryParams.lat || 40.7589,
-            longitude: telemetryParams.lon || -73.9620,
-          },
-        },
-      }));
-      setShowAlertBanner(true);
-      setIsAcknowledged(false);
-      setActiveAlertCount((prev) => prev + 1);
-      setActiveTab('triage');
-      playAlertChime();
     }
   };
 
+  // If unauthenticated (e.g. logged out), show full Login Screen
+  if (!user) {
+    return <LoginPage isDark={isDark} />;
+  }
+
+  const currentRole = user?.role || 'HOSPITAL';
+
   return (
     <div
-      className={`h-screen w-screen flex flex-col overflow-hidden select-none font-sans transition-colors duration-200 ${
+      className={`min-h-screen w-full flex flex-col font-sans transition-colors duration-200 select-none ${
         isDark ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'
       }`}
     >
-      {/* 1. TOP HEADER BAR */}
+      {/* 1. TOP HEADER BAR (With Role Status & Navigation) */}
       <Header
         hospitalName={incident.routing.hospitalName}
         traumaLevel={incident.routing.traumaLevel}
         activeCount={activeAlertCount}
         isConnected={isConnected}
         onOpenDriverModal={() => setIsDriverModalOpen(true)}
+        onOpenLoginModal={() => setIsLoginModalOpen(true)}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         isDark={isDark}
         setIsDark={setIsDark}
       />
 
-      {/* 2. DYNAMIC ALERT BANNER (High-Contrast Red with Charcoal Button to eliminate green-on-red vibration) */}
-      <AlertBanner
-        isVisible={showAlertBanner}
-        peakG={Number(incident.telematics.peakGForce).toFixed(1)}
-        etaMinutes={incident.routing.transitEtaMinutes}
-        isAcknowledged={isAcknowledged}
-        onAcknowledge={handleAcknowledge}
-      />
-
-      {/* 3. MAIN SECTION CONTENT */}
-      {activeTab === 'driver' ? (
-        // Dedicated In-Vehicle Driver Safety Console View
-        <DriverConsoleView
-          onTriggerCrashWithParams={() => setIsDriverModalOpen(true)}
-          isDark={isDark}
+      {/* 2. DYNAMIC ALERT BANNER (Active for Hospital ER role) */}
+      {currentRole === 'HOSPITAL' && (
+        <AlertBanner
+          isVisible={showAlertBanner}
+          peakG={Number(incident?.telematics?.peakGForce || 4.2).toFixed(1)}
+          etaMinutes={incident?.routing?.transitEtaMinutes || 5}
+          isAcknowledged={isAcknowledged}
+          onAcknowledge={handleAcknowledge}
         />
-      ) : (
-        // Main ER Triage Bay View: Responsive Flex Layout (Stacks on Tablet/Mobile, Side-by-Side on Desktop)
-        <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-          {/* LEFT PANEL (42% on desktop, full-width scrollable on mobile/tablet) */}
-          <section
-            className={`w-full lg:w-[42%] h-auto lg:h-full overflow-y-auto p-4 sm:p-5 space-y-4 border-b lg:border-b-0 lg:border-r transition ${
-              isDark
-                ? 'bg-slate-950/95 border-slate-800'
-                : 'bg-slate-50/80 border-blue-100'
-            }`}
-          >
-            {/* INFORMATION HIERARCHY PIVOT:
-                Patient EMR & Medical Profile is placed FIRST for immediate ATLS trauma prep */}
-            <PatientCard
-              patient={incident.patient}
-              patientCoords={incident.telematics.crashCoordinates}
-              isDark={isDark}
-            />
-
-            {/* Crash Telemetry & Kinematics placed SECOND */}
-            <TelemetryCard
-              preCrashSpeed={incident.telematics.preCrashSpeedKmh}
-              terminalSpeed={incident.telematics.impactSpeedKmh}
-              peakGForce={incident.telematics.peakGForce}
-              isDark={isDark}
-            />
-
-            {/* Action & Bay Allocation Area (Separates Status Card from Action Button) */}
-            <ActionControls
-              incidentStatus={incident.status}
-              onReserveBay={handleReserveBay}
-              onReleaseBay={handleReleaseBay}
-              isReserving={isReserving}
-              isDark={isDark}
-            />
-          </section>
-
-          {/* RIGHT PANEL (58% on desktop: Watermark-Free Esri Dark Navigation Night Canvas) */}
-          <section className="w-full lg:w-[58%] h-[380px] sm:h-[450px] lg:h-full relative flex-1">
-            <IncidentMap
-              crashCoords={{
-                lat: incident.telematics.crashCoordinates.latitude,
-                lon: incident.telematics.crashCoordinates.longitude,
-              }}
-              hospitalCoords={{
-                lat: incident.routing.hospitalCoordinates.latitude,
-                lon: incident.routing.hospitalCoordinates.longitude,
-              }}
-              hospitalName={incident.routing.hospitalName}
-              distanceKm={incident.routing.distanceKm}
-              etaMinutes={incident.routing.transitEtaMinutes}
-              isDark={isDark}
-            />
-          </section>
-        </div>
       )}
 
-      {/* 4. DRIVER 10-SECOND FAIL-SAFE COUNTDOWN MODAL */}
+      {/* 3. ROLE-BASED DASHBOARD ROUTING */}
+      <main className="flex-1 w-full min-h-0 flex flex-col overflow-y-auto lg:overflow-hidden relative">
+        {currentRole === 'HOSPITAL' && (
+          <HospitalDashboard
+            incident={incident}
+            isDark={isDark}
+            activeTab={activeTab}
+            onTriggerCrashModal={() => setIsDriverModalOpen(true)}
+            handleReserveBay={handleReserveBay}
+            handleReleaseBay={handleReleaseBay}
+            isReserving={isReserving}
+          />
+        )}
+
+        {currentRole === 'PATIENT' && (
+          <PatientDashboard
+            isDark={isDark}
+            setIsDark={setIsDark}
+            onOpenDriverModal={() => setIsDriverModalOpen(true)}
+          />
+        )}
+
+        {currentRole === 'ADMIN' && (
+          <AdminDashboard isDark={isDark} />
+        )}
+      </main>
+
+      {/* 4. DRIVER 10-SECOND FAIL-SAFE COUNTDOWN MODAL (Global for edge simulation) */}
       <DriverCountdownModal
         isOpen={isDriverModalOpen}
         onClose={() => setIsDriverModalOpen(false)}
@@ -338,6 +370,31 @@ export default function App() {
         }}
         isDark={isDark}
       />
+
+      {/* 5. ROLE SELECTION / LOGIN MODAL OVERLAY */}
+      {isLoginModalOpen && (
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsLoginModalOpen(false);
+          }}
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in overflow-y-auto"
+        >
+          <div className="relative w-full max-w-xl my-auto">
+            <LoginPage
+              isDark={isDark}
+              onCancel={() => setIsLoginModalOpen(false)}
+            />
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AuraTriageMain />
+    </AuthProvider>
   );
 }

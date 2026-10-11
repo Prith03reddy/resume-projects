@@ -6,13 +6,7 @@ export default function DriverCountdownModal({
   isOpen,
   onClose,
   onDispatchConfirmed,
-  defaultTelemetry = {
-    preSpeed: 92.4,
-    impactSpeed: 8.5,
-    peakG: 4.75,
-    latitude: 40.7589,
-    longitude: -73.9620,
-  },
+  defaultTelemetry = {},
   isDark = true,
 }) {
   const [mounted, setMounted] = useState(false);
@@ -20,6 +14,29 @@ export default function DriverCountdownModal({
   const [isMuted, setIsMuted] = useState(false);
   const [isCancelled, setIsCancelled] = useState(false);
   const [isDispatched, setIsDispatched] = useState(false);
+
+  // Generate dynamic, realistic crash kinematics whenever impact is simulated
+  const generateRandomTelemetry = (base = {}) => {
+    const preSpeed = parseFloat((base.preSpeed || (Math.random() * 46 + 74)).toFixed(1)); // 74.0 - 120.0 km/h
+    const impactSpeed = parseFloat((base.impactSpeed || (Math.random() * 7 + 3.5)).toFixed(1)); // 3.5 - 10.5 km/h
+    const peakG = parseFloat((base.peakG || (Math.random() * 2.85 + 3.90)).toFixed(2)); // 3.90g - 6.75g
+    const latitude = parseFloat((base.lat || base.latitude || (40.7250 + Math.random() * 0.0520)).toFixed(4));
+    const longitude = parseFloat((base.lon || base.longitude || (-73.9920 + Math.random() * 0.0430)).toFixed(4));
+    return {
+      preSpeed,
+      impactSpeed,
+      speedDrop: parseFloat((preSpeed - impactSpeed).toFixed(1)),
+      peakG,
+      latitude,
+      longitude,
+      lat: latitude,
+      lng: longitude,
+      lon: longitude,
+      randomize: true,
+    };
+  };
+
+  const [activeTelemetry, setActiveTelemetry] = useState(() => generateRandomTelemetry(defaultTelemetry));
   
   const audioContextRef = useRef(null);
   const intervalRef = useRef(null);
@@ -79,6 +96,10 @@ export default function DriverCountdownModal({
     setSecondsLeft(10);
     setIsCancelled(false);
     setIsDispatched(false);
+    
+    // Generate fresh randomized crash signature for this emergency countdown
+    const freshTelemetry = generateRandomTelemetry(defaultTelemetry);
+    setActiveTelemetry(freshTelemetry);
 
     playSirenBurst();
 
@@ -91,7 +112,7 @@ export default function DriverCountdownModal({
         if (prev <= 1) {
           clearInterval(intervalRef.current);
           clearInterval(audioLoopRef.current);
-          handleAutoDispatch();
+          handleAutoDispatch(freshTelemetry);
           return 0;
         }
         return prev - 1;
@@ -114,12 +135,12 @@ export default function DriverCountdownModal({
     }, 1200);
   };
 
-  const handleAutoDispatch = () => {
+  const handleAutoDispatch = (telemetryToDispatch) => {
     setIsDispatched(true);
     if (intervalRef.current) clearInterval(intervalRef.current);
     if (audioLoopRef.current) clearInterval(audioLoopRef.current);
 
-    onDispatchConfirmed(defaultTelemetry);
+    onDispatchConfirmed(telemetryToDispatch || activeTelemetry);
     setTimeout(() => {
       onClose();
     }, 1400);
@@ -130,7 +151,7 @@ export default function DriverCountdownModal({
     if (intervalRef.current) clearInterval(intervalRef.current);
     if (audioLoopRef.current) clearInterval(audioLoopRef.current);
 
-    onDispatchConfirmed(defaultTelemetry);
+    onDispatchConfirmed(activeTelemetry);
     setTimeout(() => {
       onClose();
     }, 800);
@@ -265,15 +286,15 @@ export default function DriverCountdownModal({
                     <span>Impact Telemetry Signature</span>
                   </span>
                   <span className="px-2 py-0.5 bg-red-500/20 text-red-400 border border-red-500/30 rounded font-mono font-bold text-[10px]">
-                    {defaultTelemetry.peakG}g FORCE
+                    {activeTelemetry.peakG}g FORCE
                   </span>
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
                   <div className={`p-2 rounded border ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
-                    Pre-Crash: <strong className="text-slate-100">{defaultTelemetry.preSpeed} km/h</strong>
+                    Pre-Crash: <strong className="text-slate-100">{activeTelemetry.preSpeed} km/h</strong>
                   </div>
                   <div className={`p-2 rounded border ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
-                    Terminal: <strong className="text-slate-100">{defaultTelemetry.impactSpeed} km/h</strong>
+                    Terminal: <strong className="text-slate-100">{activeTelemetry.impactSpeed} km/h</strong>
                   </div>
                 </div>
               </div>

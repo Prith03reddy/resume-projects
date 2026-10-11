@@ -1,5 +1,5 @@
 import React from 'react';
-import { User, Droplet, AlertCircle, Phone, HeartPulse, MapPin, Navigation, Radio } from 'lucide-react';
+import { User, Droplet, AlertCircle, Phone, HeartPulse, MapPin, Navigation, Radio, ExternalLink } from 'lucide-react';
 
 export default function PatientCard({
   patient = {
@@ -14,6 +14,8 @@ export default function PatientCard({
   patientCoords = { latitude: 40.7589, longitude: -73.9620 },
   isDark = true,
 }) {
+  const safePatLat = parseFloat(patientCoords?.latitude ?? patientCoords?.lat ?? 40.7589);
+  const safePatLon = parseFloat(patientCoords?.longitude ?? patientCoords?.lon ?? -73.9620);
   return (
     <div
       className={`rounded-2xl p-5 shadow-sm relative overflow-hidden transition ${
@@ -119,16 +121,21 @@ export default function PatientCard({
             <span>Patient GPS Fix:</span>
           </div>
           <div className="flex items-center space-x-1.5">
-            <span
-              className={`font-mono text-[11px] font-bold px-2.5 py-0.5 rounded-md border flex items-center space-x-1 ${
+            <a
+              href={`https://www.google.com/maps/search/?api=1&query=${safePatLat.toFixed(5)},${safePatLon.toFixed(5)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`font-mono text-[11px] font-bold px-2.5 py-0.5 rounded-md border flex items-center space-x-1 hover:border-sky-400 transition cursor-pointer ${
                 isDark
                   ? 'bg-rose-950/40 text-rose-300 border-rose-500/40'
                   : 'bg-rose-50 text-rose-700 border-rose-200'
               }`}
+              title="Open Live Patient GPS Fix in Google Maps"
             >
               <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping inline-block mr-1" />
-              <span>{patientCoords?.latitude?.toFixed(4) ?? '40.7589'}° N, {Math.abs(patientCoords?.longitude ?? 73.9620).toFixed(4)}° W</span>
-            </span>
+              <span>{safePatLat.toFixed(4)}° N, {Math.abs(safePatLon).toFixed(4)}° W</span>
+              <ExternalLink className="w-2.5 h-2.5 ml-1 text-sky-400" />
+            </a>
           </div>
         </div>
 

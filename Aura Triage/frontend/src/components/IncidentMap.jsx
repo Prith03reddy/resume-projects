@@ -20,12 +20,68 @@ function IncidentMapComponent({
   const markersLayerRef = useRef(null);
   const vehicleMarkerRef = useRef(null);
 
-  const [liveDistanceKm, setLiveDistanceKm] = useState(distanceKm);
-  const [liveEtaMinutes, setLiveEtaMinutes] = useState(etaMinutes);
-  const [transitProgress, setTransitProgress] = useState(65); // percentage along track line
-  const [mapLayerMode, setMapLayerMode] = useState('dark');
+  // Safely parse numerical values regardless of whether input is string, number, or uses lat/latitude/lng/lon
+  const cLat = Number.isFinite(parseFloat(crashCoords?.lat ?? crashCoords?.latitude))
+    ? parseFloat(crashCoords?.lat ?? crashCoords?.latitude)
+    : 40.7589;
+  const cLon = Number.isFinite(parseFloat(crashCoords?.lon ?? crashCoords?.longitude ?? crashCoords?.lng))
+    ? parseFloat(crashCoords?.lon ?? crashCoords?.longitude ?? crashCoords?.lng)
+    : -73.9620;
 
-  const coordsKey = `${crashCoords.lat.toFixed(5)},${crashCoords.lon.toFixed(5)}->${hospitalCoords.lat.toFixed(5)},${hospitalCoords.lon.toFixed(5)}`;
+  const hLat = Number.isFinite(parseFloat(hospitalCoords?.lat ?? hospitalCoords?.latitude))
+    ? parseFloat(hospitalCoords?.lat ?? hospitalCoords?.latitude)
+    : 40.7645;
+  const hLon = Number.isFinite(parseFloat(hospitalCoords?.lon ?? hospitalCoords?.longitude ?? hospitalCoords?.lng))
+    ? parseFloat(hospitalCoords?.lon ?? hospitalCoords?.longitude ?? hospitalCoords?.lng)
+    : -73.9554;
+
+  const hName = typeof hospitalName === 'string' && hospitalName.trim().length > 0
+    ? hospitalName.trim()
+    : 'Metro General Trauma Center';
+
+  const [liveDistanceKm, setLiveDistanceKm] = useState(distanceKm || 1.4);
+  const [liveEtaMinutes, setLiveEtaMinutes] = useState(etaMinutes || 5);
+  const [transitProgress, setTransitProgress] = useState(65); // percentage along track line
+  const [mapLayerMode, setMapLayerMode] = useState('google'); // 'google' | 'satellite' | 'street'
+
+  // Synchronize state when props update
+  useEffect(() => {
+    if (distanceKm) setLiveDistanceKm(distanceKm);
+  }, [distanceKm]);
+
+  useEffect(() => {
+    if (etaMinutes) setLiveEtaMinutes(etaMinutes);
+  }, [etaMinutes]);
+
+  const getTileConfig = useCallback((mode) => {
+    if (mode === 'satellite') {
+      return {
+        url: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+        options: { maxZoom: 20, subdomains: ['mt0', 'mt1', 'mt2', 'mt3'], attribution: '&copy; Google Satellite' },
+      };
+    }
+    if (mode === 'street') {
+      return {
+        url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        options: { maxZoom: 19, subdomains: 'abcd', attribution: '&copy; OpenStreetMap' },
+      };
+    }
+    // Default mode: 'google' (Google Maps standard roadmap tiles)
+    return {
+      url: 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+      options: { maxZoom: 20, subdomains: ['mt0', 'mt1', 'mt2', 'mt3'], attribution: '&copy; Google Maps' },
+    };
+  }, []);
+
+  const cycleMapLayer = () => {
+    const modes = ['google', 'satellite', 'street'];
+    setMapLayerMode((prev) => {
+      const idx = modes.indexOf(prev);
+      return modes[(idx + 1) % modes.length];
+    });
+  };
+
+  const coordsKey = `${cLat.toFixed(5)},${cLon.toFixed(5)}->${hLat.toFixed(5)},${hLon.toFixed(5)}`;
   const prevCoordsKeyRef = useRef('');
 
   // 1. Fetch High-Fidelity Street Routing via OSRM
@@ -65,62 +121,87 @@ function IncidentMapComponent({
         [startLat, startLon],
         [endLat, endLon],
       ],
-      distanceKm,
-      etaMinutes,
+      distanceKm: distanceKm || 1.4,
+      etaMinutes: etaMinutes || 5,
     };
   }, [distanceKm, etaMinutes]);
 
-  // 2. Initialize Leaflet Map Instance
+  // 2. Initialize Leaflet Map Instance with React 18 StrictMode Safety
   useEffect(() => {
     if (!mapContainerRef.current) return;
 
-    if (!mapInstanceRef.current) {
-      const map = L.map(mapContainerRef.current, {
-        center: [(crashCoords.lat + hospitalCoords.lat) / 2, (crashCoords.lon + hospitalCoords.lon) / 2],
-        zoom: 14,
-        zoomControl: false,
-        attributionControl: false,
-      });
-
-      const darkTileUrl = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}';
-      const streetTileUrl = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
-
-      const initialUrl = isDark ? darkTileUrl : streetTileUrl;
-      const tileLayer = L.tileLayer(initialUrl, {
-        maxZoom: 19,
-        attribution: '&copy; Esri, OpenStreetMap contributors',
-      }).addTo(map);
-
-      tileLayerRef.current = tileLayer;
-
-      L.control.zoom({ position: 'bottomright' }).addTo(map);
-
-      routeLayerRef.current = L.layerGroup().addTo(map);
-      markersLayerRef.current = L.layerGroup().addTo(map);
-      mapInstanceRef.current = map;
-
-      // Ensure proper sizing in flex layouts
-      setTimeout(() => {
-        map.invalidateSize();
-      }, 250);
+    // Reset container if previously tagged by Leaflet
+    if (mapContainerRef.current._leaflet_id) {
+      mapContainerRef.current._leaflet_id = null;
     }
+
+    const initialCenterLat = (cLat + hLat) / 2;
+    const initialCenterLon = (cLon + hLon) / 2;
+
+    const map = L.map(mapContainerRef.current, {
+      center: [initialCenterLat, initialCenterLon],
+      zoom: 14,
+      zoomControl: false,
+      attributionControl: false,
+    });
+
+    const { url, options } = getTileConfig(mapLayerMode);
+    const tileLayer = L.tileLayer(url, options).addTo(map);
+
+    tileLayerRef.current = tileLayer;
+
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+    routeLayerRef.current = L.layerGroup().addTo(map);
+    markersLayerRef.current = L.layerGroup().addTo(map);
+    mapInstanceRef.current = map;
+
+    // Invalidate size on mount and window resize
+    const invalidate = () => {
+      if (map) {
+        map.invalidateSize();
+      }
+    };
+
+    setTimeout(invalidate, 50);
+    setTimeout(invalidate, 150);
+    setTimeout(invalidate, 300);
+    setTimeout(invalidate, 600);
+    setTimeout(invalidate, 1200);
+
+    const resizeObserver = new ResizeObserver(() => {
+      invalidate();
+    });
+    resizeObserver.observe(mapContainerRef.current);
+
+    return () => {
+      resizeObserver.disconnect();
+      if (map) {
+        map.remove();
+        mapInstanceRef.current = null;
+      }
+    };
   }, []);
 
-  // 3. Handle Tile Layer Switching
+  // 3. Handle Tile Layer Switching (Dark, Google Maps Road, Google Satellite, OpenStreetMap)
   useEffect(() => {
-    if (!tileLayerRef.current) return;
-    const darkTileUrl = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}';
-    const streetTileUrl = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+    if (!mapInstanceRef.current) return;
+    const { url, options } = getTileConfig(mapLayerMode);
 
-    const targetUrl = (mapLayerMode === 'dark' || isDark) ? darkTileUrl : streetTileUrl;
-    if (tileLayerRef.current._url !== targetUrl) {
-      tileLayerRef.current.setUrl(targetUrl);
+    if (tileLayerRef.current) {
+      mapInstanceRef.current.removeLayer(tileLayerRef.current);
     }
-  }, [mapLayerMode, isDark]);
+
+    const newLayer = L.tileLayer(url, options).addTo(mapInstanceRef.current);
+    if (newLayer.bringToBack) {
+      newLayer.bringToBack();
+    }
+    tileLayerRef.current = newLayer;
+  }, [mapLayerMode, getTileConfig]);
 
   // 4. Draw Patient Location, Track Line, Moving Ambulance, and Hospital
   useEffect(() => {
-    if (!mapInstanceRef.current) return;
+    if (!mapInstanceRef.current || !markersLayerRef.current || !routeLayerRef.current) return;
     const map = mapInstanceRef.current;
     const markersLayer = markersLayerRef.current;
     const routeLayer = routeLayerRef.current;
@@ -150,14 +231,14 @@ function IncidentMapComponent({
       iconAnchor: [22, 22],
     });
 
-    L.marker([crashCoords.lat, crashCoords.lon], { icon: patientGpsIcon })
+    L.marker([cLat, cLon], { icon: patientGpsIcon })
       .addTo(markersLayer)
       .bindPopup(`
         <div style="color: #0f172a; font-family: sans-serif; font-size: 12px; padding: 4px; line-height: 1.4;">
-          <strong style="color: #ef4444; font-size: 13px;">🚨 PATIENT GPS LOCATION (CRASH FIX)</strong><br/>
-          <span>Lat: <strong>${crashCoords.lat.toFixed(5)}° N</strong></span><br/>
-          <span>Lon: <strong>${Math.abs(crashCoords.lon).toFixed(5)}° W</strong></span><br/>
-          <span style="color: #0284c7; font-weight: 700;">Nearest ER: ${hospitalName}</span>
+          <strong style="color: #ef4444; font-size: 13px;">🚨 PATIENT GPS LOCATION (CRASH SITE)</strong><br/>
+          <span>Lat: <strong>${cLat.toFixed(5)}° N</strong></span><br/>
+          <span>Lon: <strong>${Math.abs(cLon).toFixed(5)}° W</strong></span><br/>
+          <span style="color: #0284c7; font-weight: 700;">Nearest ER: ${hName}</span>
         </div>
       `);
 
@@ -178,37 +259,36 @@ function IncidentMapComponent({
       iconAnchor: [16, 16],
     });
 
-    L.marker([hospitalCoords.lat, hospitalCoords.lon], { icon: hospitalIcon })
+    L.marker([hLat, hLon], { icon: hospitalIcon })
       .addTo(markersLayer)
       .bindPopup(`
         <div style="color: #0f172a; font-family: sans-serif; font-size: 12px; padding: 4px; line-height: 1.4;">
           <strong style="color: #10b981; font-size: 13px;">🏥 RECEIVING TRAUMA CENTER</strong><br/>
-          <span style="font-weight: 600;">${hospitalName}</span><br/>
-          <span>Lat: ${hospitalCoords.lat.toFixed(5)}° N, Lon: ${Math.abs(hospitalCoords.lon).toFixed(5)}° W</span>
+          <span style="font-weight: 600;">${hName}</span><br/>
+          <span>Lat: ${hLat.toFixed(5)}° N, Lon: ${Math.abs(hLon).toFixed(5)}° W</span>
         </div>
       `);
 
     // ─── C. INSTANT SYNCHRONOUS DIRECT TRACK LINE CORRIDOR ───
-    // Draw immediately so the track line indicator is NEVER missing even if OSRM is loading
     const directFallbackLine = [
-      [crashCoords.lat, crashCoords.lon],
-      [hospitalCoords.lat, hospitalCoords.lon],
+      [cLat, cLon],
+      [hLat, hLon],
     ];
 
     const glowPolyline = L.polyline(directFallbackLine, {
-      color: '#0284c7', // Sky-600 glow halo
+      color: '#0284c7',
       weight: 8,
       opacity: 0.35,
       lineCap: 'round',
     }).addTo(routeLayer);
 
     const activeTrackPolyline = L.polyline(directFallbackLine, {
-      color: '#38bdf8', // High-visibility Sky-400
+      color: '#38bdf8',
       weight: 4.5,
       opacity: 0.95,
       lineCap: 'round',
       dashArray: '10, 10',
-      className: 'animated-track-line', // Actively streams/flows with CSS animation!
+      className: 'animated-track-line',
     }).addTo(routeLayer);
 
     // Initial bounds fit
@@ -216,16 +296,14 @@ function IncidentMapComponent({
     map.fitBounds(initialBounds, { padding: [60, 60], maxZoom: 16 });
 
     // ─── D. ASYNCHRONOUS OSRM REAL STREET NETWORK REFINEMENT ───
-    fetchOsrmDrivingRoute(crashCoords.lat, crashCoords.lon, hospitalCoords.lat, hospitalCoords.lon).then((routeData) => {
+    fetchOsrmDrivingRoute(cLat, cLon, hLat, hLon).then((routeData) => {
       if (routeData && routeData.latLngs && routeData.latLngs.length > 1) {
-        // Upgrade polylines to genuine street network curvature
         glowPolyline.setLatLngs(routeData.latLngs);
         activeTrackPolyline.setLatLngs(routeData.latLngs);
 
         setLiveDistanceKm(routeData.distanceKm);
         setLiveEtaMinutes(routeData.etaMinutes);
 
-        // ─── E. LIVE AMBULANCE TRANSIT TRACKER MARKER ALONG TRACK LINE ───
         // Calculate vehicle waypoint at ~65% along track line
         const waypointIndex = Math.min(
           routeData.latLngs.length - 1,
@@ -257,31 +335,32 @@ function IncidentMapComponent({
             <div style="color: #0f172a; font-family: sans-serif; font-size: 12px; padding: 4px;">
               <strong style="color: #0284c7;">AMBULANCE UNIT 4 EN ROUTE</strong><br/>
               <span>Speed: <strong>64 km/h</strong></span><br/>
-              <span>Corridor Transit: <strong>68% Completed</strong></span>
+              <span>Corridor Transit: <strong>65% Completed</strong></span>
             </div>
           `);
 
         vehicleMarkerRef.current = ambMarker;
 
-        // Auto-fit to full road bounds
         const routeBounds = L.latLngBounds(routeData.latLngs);
         map.fitBounds(routeBounds, { padding: [60, 60], maxZoom: 16 });
       }
     });
 
-  }, [coordsKey, crashCoords.lat, crashCoords.lon, hospitalCoords.lat, hospitalCoords.lon, hospitalName, fetchOsrmDrivingRoute]);
+  }, [coordsKey, cLat, cLon, hLat, hLon, hName, fetchOsrmDrivingRoute]);
 
   const handleRecenter = () => {
     if (!mapInstanceRef.current) return;
     const bounds = L.latLngBounds([
-      [crashCoords.lat, crashCoords.lon],
-      [hospitalCoords.lat, hospitalCoords.lon],
+      [cLat, cLon],
+      [hLat, hLon],
     ]);
     mapInstanceRef.current.fitBounds(bounds, { padding: [60, 60], maxZoom: 16 });
   };
 
+  const googleNavUrl = `https://www.google.com/maps/dir/?api=1&origin=${hLat},${hLon}&destination=${cLat},${cLon}`;
+
   return (
-    <div className={`w-full h-full relative overflow-hidden flex flex-col ${isDark ? 'bg-slate-950' : 'bg-slate-100'}`}>
+    <div className={`w-full h-full min-h-[420px] relative overflow-hidden flex flex-col ${isDark ? 'bg-slate-950' : 'bg-slate-100'}`}>
       
       {/* ─── 1. DEDICATED LIVE GPS TRANSIT & TRACK LINE INDICATOR HUD BAR ─── */}
       <div className="z-10 bg-slate-900/95 border-b border-slate-800 px-4 py-2 flex flex-wrap items-center justify-between gap-2 shadow-md">
@@ -291,7 +370,7 @@ function IncidentMapComponent({
           <div className="flex items-center space-x-1.5 bg-red-950/60 border border-red-500/40 text-red-300 px-2.5 py-1 rounded-lg">
             <span className="w-2 h-2 rounded-full bg-red-500 animate-ping inline-block" />
             <span className="font-bold">PATIENT GPS:</span>
-            <span className="text-white font-bold">{crashCoords.lat.toFixed(4)}°, {crashCoords.lon.toFixed(4)}°</span>
+            <span className="text-white font-bold">{cLat.toFixed(4)}°, {cLon.toFixed(4)}°</span>
           </div>
 
           {/* Animated Connecting Track Arrow */}
@@ -309,38 +388,55 @@ function IncidentMapComponent({
           <div className="flex items-center space-x-1.5 bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 px-2.5 py-1 rounded-lg">
             <Hospital className="w-3.5 h-3.5 text-emerald-400" />
             <span className="font-bold">RECEIVING BAY:</span>
-            <span className="text-white font-bold">{hospitalName.split(' ')[0]} ({liveDistanceKm} km)</span>
+            <span className="text-white font-bold">{hName.split(' ')[0]} ({liveDistanceKm} km)</span>
           </div>
         </div>
 
-        {/* Right: Quick Map Controls */}
+        {/* Right: Quick Map Controls & Navigation */}
         <div className="flex items-center space-x-2">
+          {/* Direct Google Maps Turn-by-Turn Navigation */}
+          <a
+            href={googleNavUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center space-x-1 text-[11px] font-mono font-bold px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white shadow-sm transition"
+            title="Open Turn-by-Turn Navigation in Google Maps"
+          >
+            <Navigation className="w-3 h-3" />
+            <span>Google Nav</span>
+          </a>
+
           <button
             onClick={handleRecenter}
             className="flex items-center space-x-1 text-[11px] font-mono font-semibold px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
             title="Recenter corridor view"
           >
             <Compass className="w-3 h-3 text-sky-400" />
-            <span>Recenter Corridor</span>
+            <span className="hidden md:inline">Recenter</span>
           </button>
 
           <button
-            onClick={() => setMapLayerMode(mapLayerMode === 'dark' ? 'street' : 'dark')}
-            className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
-            title="Toggle Map Style"
+            onClick={cycleMapLayer}
+            className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition text-[11px] font-mono font-semibold"
+            title="Toggle Map Style (Google Maps, Google Satellite, Street Mode)"
           >
-            <Layers className="w-3.5 h-3.5" />
+            <Layers className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="uppercase text-[10px] tracking-wider">{mapLayerMode}</span>
           </button>
         </div>
       </div>
 
       {/* ─── 2. MAP CANVAS (LEAFLET + ZERO API KEYS) ─── */}
-      <div className="flex-1 w-full relative">
-        <div ref={mapContainerRef} className="w-full h-full z-0" />
+      <div className="flex-1 w-full relative min-h-[380px]" style={{ minHeight: '380px' }}>
+        <div
+          ref={mapContainerRef}
+          className="w-full h-full z-0 absolute inset-0"
+          style={{ width: '100%', height: '100%' }}
+        />
 
         {/* ─── 3. FLOATING ROUTE & LIVE TELEMETRY CARD ─── */}
         <div
-          className={`absolute top-4 right-4 z-[100] rounded-2xl p-4 shadow-2xl backdrop-blur-md min-w-[240px] border transition ${
+          className={`absolute top-4 right-4 z-[400] rounded-2xl p-4 shadow-2xl backdrop-blur-md min-w-[240px] border transition pointer-events-auto ${
             isDark
               ? 'bg-slate-900/90 border-slate-700/80 text-slate-100 shadow-black/70'
               : 'bg-white/95 border-blue-200/90 text-slate-900 shadow-xl'
@@ -432,7 +528,7 @@ function IncidentMapComponent({
 
         {/* ─── 4. MAP LEGEND (Bottom Left) ─── */}
         <div
-          className={`absolute bottom-4 left-4 z-[100] rounded-xl px-3.5 py-2 text-xs flex items-center space-x-4 shadow-lg backdrop-blur-sm border ${
+          className={`absolute bottom-4 left-4 z-[400] rounded-xl px-3.5 py-2 text-xs flex items-center space-x-4 shadow-lg backdrop-blur-sm border pointer-events-auto ${
             isDark
               ? 'bg-slate-900/90 border-slate-800 text-slate-300'
               : 'bg-white/90 border-slate-200 text-slate-700'
@@ -460,15 +556,4 @@ function IncidentMapComponent({
   );
 }
 
-export default memo(IncidentMapComponent, (prev, next) => {
-  return (
-    prev.crashCoords.lat === next.crashCoords.lat &&
-    prev.crashCoords.lon === next.crashCoords.lon &&
-    prev.hospitalCoords.lat === next.hospitalCoords.lat &&
-    prev.hospitalCoords.lon === next.hospitalCoords.lon &&
-    prev.hospitalName === next.hospitalName &&
-    prev.distanceKm === next.distanceKm &&
-    prev.etaMinutes === next.etaMinutes &&
-    prev.isDark === next.isDark
-  );
-});
+export default memo(IncidentMapComponent);

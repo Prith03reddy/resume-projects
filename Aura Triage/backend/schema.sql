@@ -133,3 +133,4 @@ INSERT INTO hospitals (
     ST_SetSRID(ST_MakePoint(-73.9980, 40.7180), 4326),
     TRUE
 );
+
